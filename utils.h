@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include "apartment.h"
+#include "ahp.h"
 
 std::string urlDecode(const std::string& src);
 std::map<std::string, std::string> parseFormData(const std::string& body);

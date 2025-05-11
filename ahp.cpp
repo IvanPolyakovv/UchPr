@@ -3,6 +3,7 @@
 #include <numeric>
 #include <cmath>
 #include <map>
+#include <iostream> // Для std::cerr
 
 const std::vector<std::string> AHP::criteria = {
     "price", "area", "rooms", "district", "transport",
@@ -10,12 +11,21 @@ const std::vector<std::string> AHP::criteria = {
 };
 
 const std::vector<std::vector<double>> AHP::saatiScale = {
-    {1, 1}, {2, 0.5}, {3, 1.0/3}, {4, 0.25}, {5, 0.2},
-    {0.5, 2}, {1.0/3, 3}, {0.25, 4}, {0.2, 5}
+    {1, 1},       // 0: Одинаково важны
+    {3, 1.0/3},   // 1: Слегка важнее (первый важнее второго в 3 раза)
+    {5, 1.0/5},   // 2: Сильно важнее (первый важнее второго в 5 раз)
+    {7, 1.0/7},   // 3: Очень сильно важнее (первый важнее второго в 7 раз)
+    {9, 1.0/9},   // 4: Абсолютно важнее (первый важнее второго в 9 раз)
+    {1.0/3, 3},   // 5: Слегка менее важны (второй важнее первого в 3 раза)
+    {1.0/5, 5},   // 6: Сильно менее важны (второй важнее первого в 5 раз)
+    {1.0/7, 7},   // 7: Очень сильно менее важны (второй важнее первого в 7 раз)
+    {1.0/9, 9}    // 8: Абсолютно менее важны (второй важнее первого в 9 раз)
 };
 
+
 std::vector<std::vector<double>> AHP::createComparisonMatrix(const std::map<std::string, int>& comparisons) {
-    std::vector<std::vector<double>> matrix(criteria.size(), std::vector<double>(criteria.size(), 1.0));
+    size_t n = criteria.size();
+    std::vector<std::vector<double>> matrix(n, std::vector<double>(n, 1.0));
 
     for (const auto& [pair, value] : comparisons) {
         size_t dash_pos = pair.find('-');
@@ -28,38 +38,62 @@ std::vector<std::vector<double>> AHP::createComparisonMatrix(const std::map<std:
         if (it1 != criteria.end() && it2 != criteria.end()) {
             size_t i = std::distance(criteria.begin(), it1);
             size_t j = std::distance(criteria.begin(), it2);
-            matrix[i][j] = saatiScale[value][0];
-            matrix[j][i] = saatiScale[value][1];
+
+            if (value >= 0 && value < saatiScale.size()) {
+                matrix[i][j] = saatiScale[value][0];
+                matrix[j][i] = saatiScale[value][1];
+            } else {
+                std::cerr << "Ошибка: недопустимое значение value = " << value << " для пары " << pair << "\n";
+                matrix[i][j] = 1.0;
+                matrix[j][i] = 1.0;
+            }
+        } else {
+            std::cerr << "Ошибка: не найдены критерии для пары " << pair << "\n";
         }
     }
 
     return matrix;
 }
 
-std::vector<double> AHP::calculateWeights(const std::vector<std::vector<double>>& matrix) {
-    std::vector<double> weights(matrix.size(), 1.0);
 
-    for (size_t i = 0; i < matrix.size(); ++i) {
-        double product = 1.0;
-        for (size_t j = 0; j < matrix[i].size(); ++j) {
-            product *= matrix[i][j];
+std::vector<double> AHP::calculateWeights(const std::vector<std::vector<double>>& matrix) {
+    size_t n = matrix.size();
+    std::vector<double> weights(n, 0.0);
+
+    // Шаг 1: Вычисляем сумму каждого столбца
+    std::vector<double> columnSums(n, 0.0);
+    for (size_t j = 0; j < n; ++j) {
+        for (size_t i = 0; i < n; ++i) {
+            columnSums[j] += matrix[i][j];
         }
-        weights[i] = std::pow(product, 1.0 / matrix.size());
     }
 
-    double sum = std::accumulate(weights.begin(), weights.end(), 0.0);
-    for (double& w : weights) {
-        w /= sum;
+    // Шаг 2: Нормируем матрицу (делим каждый элемент на сумму его столбца)
+    std::vector<std::vector<double>> normalizedMatrix(n, std::vector<double>(n, 0.0));
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            normalizedMatrix[i][j] = matrix[i][j] / columnSums[j];
+        }
+    }
+
+    // Шаг 3: Вычисляем среднее значение для каждой строки (вес критерия)
+    for (size_t i = 0; i < n; ++i) {
+        double rowSum = 0.0;
+        for (size_t j = 0; j < n; ++j) {
+            rowSum += normalizedMatrix[i][j];
+        }
+        weights[i] = rowSum / n;
     }
 
     return weights;
 }
 
-double AHP::calculateConsistencyRatio(const std::vector<std::vector<double>>& matrix,
-                                      const std::vector<double>& weights) {
+
+double AHP::calculateConsistencyRatio(const std::vector<std::vector<double>>& matrix, const std::vector<double>& weights) {
     size_t n = matrix.size();
     if (n < 2) return 0.0;
 
+    // Вычисление главного собственного значения
     double lambda_max = 0.0;
     for (size_t i = 0; i < n; ++i) {
         double row_sum = 0.0;
@@ -70,12 +104,15 @@ double AHP::calculateConsistencyRatio(const std::vector<std::vector<double>>& ma
     }
     lambda_max /= n;
 
+    // Индекс согласованности (CI)
     double CI = (lambda_max - n) / (n - 1);
 
+    // Случайный индекс (RI) для n критериев
     static const std::map<size_t, double> RI = {
         {1, 0.0}, {2, 0.0}, {3, 0.58}, {4, 0.9}, {5, 1.12},
         {6, 1.24}, {7, 1.32}, {8, 1.41}, {9, 1.45}, {10, 1.49}
     };
 
+    // Отношение согласованности (CR)
     return CI / RI.at(n);
 }

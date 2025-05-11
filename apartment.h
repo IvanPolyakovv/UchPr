@@ -2,26 +2,27 @@
 #define APARTMENT_H
 
 #include <string>
-#include <vector>
 #include <map>
+#include <vector>
 
-struct Apartment {
-    int id;
+class Apartment {
+public:
+    std::string description;
+    std::string district;
+    int id = 0;  // Добавлено
     double price;
     double area;
     int rooms;
-    std::string district;
-    double transport;
-    double infrastructure;
-    std::string condition;
+    bool balcony;
     std::string house_type;
     int floor;
-    bool balcony;
-    std::string description;
-    std::string photo_url;
+    double lat; // Широта
+    double lon; // Долгота
+    double transport; // Транспортная доступность
+    double infrastructure; // Инфраструктура
+    std::string condition; // Состояние квартиры
 
-    double evaluate(const std::vector<double>& weights,
-                    const std::map<std::string, std::string>& userParams) const;
+    double evaluate(const std::vector<double>& weights, const std::map<std::string, std::string>& userParams) const;
     static double normalizeScore(double rawScore, double minScore, double maxScore);
 };
 

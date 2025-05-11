@@ -1,12 +1,71 @@
 #include "crow/crow.h"
-
 #include "ahp.h"
 #include "database.h"
-#include "qsqlerror.h"
 #include "utils.h"
 #include "webui.h"
 #include <QCoreApplication>
 #include <QSqlQuery>
+
+double safeStod(const std::string& str) {
+    try {
+        return std::stod(str);
+    } catch (const std::invalid_argument&) {
+        return 0.0; // Возвращаем значение по умолчанию
+    }
+}
+
+int safeStoi(const std::string& str) {
+    try {
+        return str.empty() ? 0 : std::stoi(str);
+    } catch (const std::invalid_argument&) {
+        return 0; // Return default value
+    }
+}
+
+std::vector<Apartment> filterApartments(const std::vector<Apartment>& apartments, const std::map<std::string, std::string>& filters) {
+    std::vector<Apartment> filtered;
+
+    for (const auto& apt : apartments) {
+        bool matches = true;
+
+        if (filters.count("budget") && !filters.at("budget").empty() && apt.price > safeStod(filters.at("budget"))) {
+            matches = false;
+        }
+        if (filters.count("area_min") && !filters.at("area_min").empty() && apt.area < safeStod(filters.at("area_min"))) {
+            matches = false;
+        }
+        if (filters.count("area_max") && !filters.at("area_max").empty() && apt.area > safeStod(filters.at("area_max"))) {
+            matches = false;
+        }
+        if (filters.count("rooms") && !filters.at("rooms").empty() && apt.rooms != safeStoi(filters.at("rooms"))) {
+            matches = false;
+        }
+        if (filters.count("district") && !filters.at("district").empty() && apt.district != filters.at("district")) {
+            matches = false;
+        }
+        if (filters.count("house_type") && !filters.at("house_type").empty() && apt.house_type != filters.at("house_type")) {
+            matches = false;
+        }
+        if (filters.count("floor_min") && !filters.at("floor_min").empty() && apt.floor < safeStoi(filters.at("floor_min"))) {
+            matches = false;
+        }
+        if (filters.count("floor_max") && !filters.at("floor_max").empty() && apt.floor > safeStoi(filters.at("floor_max"))) {
+            matches = false;
+        }
+        if (filters.count("balcony") && !filters.at("balcony").empty()) {
+            std::string balcony = filters.at("balcony");
+            if ((balcony == "1" && !apt.balcony) || (balcony == "0" && apt.balcony)) {
+                matches = false;
+            }
+        }
+
+        if (matches) {
+            filtered.push_back(apt);
+        }
+    }
+
+    return filtered;
+}
 
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
@@ -34,7 +93,25 @@ int main(int argc, char *argv[]) {
                        "floor_max TEXT,"
                        "house_type TEXT,"
                        "infrastructure TEXT,"
-                       "transport TEXT)");
+                       "transport TEXT,"
+                       "lat REAL,"
+                       "lon REAL)");
+
+            query.exec("CREATE TABLE IF NOT EXISTS user_preferences ("
+                       "username TEXT PRIMARY KEY,"
+                       "budget TEXT,"
+                       "district TEXT,"
+                       "type TEXT,"
+                       "area_min TEXT,"
+                       "area_max TEXT,"
+                       "rooms TEXT,"
+                       "balcony TEXT,"
+                       "floor_min TEXT,"
+                       "floor_max TEXT,"
+                       "house_type TEXT,"
+                       "infrastructure TEXT,"
+                       "transport TEXT)"
+                       );
 
             query.exec("CREATE TABLE IF NOT EXISTS user_weights ("
                        "username TEXT PRIMARY KEY,"
@@ -68,33 +145,43 @@ int main(int argc, char *argv[]) {
                        "floor INTEGER,"
                        "balcony BOOLEAN,"
                        "description TEXT,"
-                       "photo_url TEXT)");
+                       "photo_url TEXT,"
+                       "lat REAL,"
+                       "lon REAL)");
 
-            // Insert some sample apartments if table is empty
+            // Вставка тестовых данных, если таблица пуста
+            query.exec("CREATE TABLE IF NOT EXISTS favorites ("
+                       "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                       "username TEXT,"
+                       "apartment_id INTEGER,"
+                       "FOREIGN KEY(apartment_id) REFERENCES apartments(id))");
+            query.exec("CREATE TABLE IF NOT EXISTS favorites ("
+                       "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                       "username TEXT,"
+                       "apartment_id INTEGER,"
+                       "FOREIGN KEY(apartment_id) REFERENCES apartments(id))");
+
+            // Добавляем тестовые данные, если таблица apartments пуста
             query.exec("SELECT COUNT(*) FROM apartments");
             if (query.next() && query.value(0).toInt() == 0) {
-                query.exec("INSERT INTO apartments (price, area, rooms, district, transport, infrastructure, condition, house_type, floor, balcony, description, photo_url) "
-                           "VALUES (5000000, 45.5, 2, 'Центральный', 8.5, 7.2, 'хороший', 'кирпичный', 5, 1, 'Уютная 2-комнатная квартира в центре', 'apt1.jpg')");
-                query.exec("INSERT INTO apartments (price, area, rooms, district, transport, infrastructure, condition, house_type, floor, balcony, description, photo_url) "
-                           "VALUES (3500000, 33.0, 1, 'Северный', 6.0, 5.5, 'новый', 'панельный', 3, 0, 'Современная 1-комнатная квартира', 'apt2.jpg')");
-                query.exec("INSERT INTO apartments (price, area, rooms, district, transport, infrastructure, condition, house_type, floor, balcony, description, photo_url) "
-                           "VALUES (7000000, 65.0, 3, 'Западный', 7.8, 8.0, 'новый', 'монолитный', 10, 1, 'Просторная 3-комнатная квартира', 'apt3.jpg')");
+                query.exec(R"(
+                INSERT INTO apartments (description, district, price, area, rooms, balcony, house_type, floor, transport, infrastructure, condition, lat, lon)
+                VALUES
+                    ("Квартира в центре", "Центральный", 10000000, 80, 3, 1, "кирпичный", 5, 8.5, 7.2, "новый", 59.934280, 30.335099),
+                    ("Квартира на Васильевском острове", "Василеостровский", 8000000, 70, 2, 0, "панельный", 3, 6.0, 5.5, "хороший", 59.941000, 30.259000),
+                    ("Квартира в Приморском районе", "Приморский", 7000000, 60, 1, 1, "монолитный", 7, 7.8, 8.0, "новый", 60.001073, 30.265886),
+                    ("Квартира в новостройке", "Невский", 9000000, 75, 2, 1, "монолитный", 10, 8.0, 7.5, "новый", 59.931000, 30.363000),
+                    ("Вторичка в Калининском районе", "Калининский", 6500000, 65, 2, 0, "панельный", 2, 6.5, 6.0, "хороший", 59.960000, 30.390000)
+            )");
             }
         }
     }
 
     crow::SimpleApp server;
 
+    // Маршруты
     CROW_ROUTE(server, "/login").methods("GET"_method)([]() {
-        return crow::response(R"(<html><head><meta charset='UTF-8'></head><body>
-                   <h2>Вход в систему</h2>
-                   <form action='/login' method='POST'>
-                   Логин: <input type='text' name='username'><br>
-                   Пароль: <input type='password' name='password'><br>
-                   <input type='submit' value='Войти'>
-                   </form><br>
-                   <a href='/register'>Нет аккаунта? Зарегистрируйтесь</a>
-                   </body></html>)");
+        return crow::response(generateLoginPage());
     });
 
     CROW_ROUTE(server, "/login").methods("POST"_method)([](const crow::request& req) -> crow::response {
@@ -104,7 +191,7 @@ int main(int argc, char *argv[]) {
 
         if (checkCredentials(username, password)) {
             crow::response res;
-            res.redirect("/parameters?username=" + username);
+            res.redirect("/view_apartments?username=" + username);
             return res;
         } else {
             return crow::response("<html><head><meta charset='UTF-8'></head><body><h2>Неверный логин или пароль!</h2><a href='/login'>Назад</a></body></html>");
@@ -112,335 +199,460 @@ int main(int argc, char *argv[]) {
     });
 
     CROW_ROUTE(server, "/register").methods("GET"_method)([]() {
-        return crow::response(R"(<html><head><meta charset='UTF-8'></head><body>
-                   <h2>Регистрация</h2>
-                   <form action='/register' method='POST'>
-                   Логин: <input type='text' name='username'><br>
-                   Пароль: <input type='password' name='password'><br>
-                   <input type='submit' value='Зарегистрироваться'>
-                   </form><br>
-                   <a href='/login'>Уже есть аккаунт? Войти</a>
-                   </body></html>)");
+        return crow::response(generateRegisterPage());
     });
 
-    CROW_ROUTE(server, "/register").methods("POST"_method)([](const crow::request& req) -> crow::response {
+    CROW_ROUTE(server, "/register").methods("POST"_method)([](const crow::request& req) {
         auto formData = parseFormData(req.body);
         auto username = formData["username"];
         auto password = formData["password"];
-        if (registerUser(username, password)) {
+
+        // Собираем предпочтения
+        std::map<std::string, std::string> preferences;
+        preferences["budget"] = formData["budget"];
+        preferences["district"] = formData["district"];
+        preferences["type"] = formData["type"];
+        preferences["area_min"] = formData["area_min"];
+        preferences["area_max"] = formData["area_max"];
+        preferences["rooms"] = formData["rooms"];
+        preferences["balcony"] = formData["balcony"];
+        preferences["floor_min"] = formData["floor_min"];
+        preferences["floor_max"] = formData["floor_max"];
+        preferences["house_type"] = formData["house_type"];
+
+        if (registerUser(username, password, preferences)) {
             crow::response res;
-            res.redirect("/parameters?username=" + username);
+            res.redirect("/select_criteria?username=" + username);
             return res;
         } else {
             return crow::response("<html><head><meta charset='UTF-8'></head><body><h2>Ошибка регистрации! Логин занят или ошибка базы данных.</h2><a href='/register'>Попробовать снова</a></body></html>");
         }
     });
 
-    CROW_ROUTE(server, "/parameters").methods("GET"_method)([](const crow::request& req) -> crow::response {
+    CROW_ROUTE(server, "/select_criteria").methods("GET"_method, "POST"_method)([](const crow::request& req) -> crow::response {
         const char* username_param = req.url_params.get("username");
         std::string username = username_param ? username_param : "";
 
         if (username.empty()) {
-            crow::response res;
-            res.redirect("/login");
-            return res;
+            return crow::response(400, "Нет имени пользователя");
         }
 
-        // Получаем текущие параметры пользователя
-        auto params = getUserParameters(username);
-
-        // Генерируем HTML-форму с текущими параметрами
-        std::ostringstream html;
-        html << "<html><head><meta charset='UTF-8'>"
-             << "<style>"
-             << "body { font-family: Arial, sans-serif; margin: 20px; }"
-             << "form { max-width: 500px; margin: 0 auto; }"
-             << "label { display: block; margin-top: 10px; }"
-             << "input, select { width: 100%; padding: 8px; margin-top: 5px; }"
-             << "</style></head><body>"
-             << "<h2>Настройки пользователя: " << username << "</h2>"
-             << "<form action='/parameters' method='POST'>"
-             << "<input type='hidden' name='username' value='" << username << "'>"
-
-             << "<label>Бюджет (руб):</label>"
-             << "<input type='number' name='budget' value='" << (params.count("budget") ? params.at("budget") : "") << "'>"
-
-             << "<label>Район:</label>"
-             << "<input type='text' name='district' value='" << (params.count("district") ? params.at("district") : "") << "'>"
-
-             << "<label>Минимальная площадь (м²):</label>"
-             << "<input type='number' step='0.1' name='area_min' value='" << (params.count("area_min") ? params.at("area_min") : "") << "'>"
-
-             << "<label>Максимальная площадь (м²):</label>"
-             << "<input type='number' step='0.1' name='area_max' value='" << (params.count("area_max") ? params.at("area_max") : "") << "'>"
-
-             << "<label>Количество комнат:</label>"
-             << "<input type='number' name='rooms' value='" << (params.count("rooms") ? params.at("rooms") : "") << "'>"
-
-             << "<label>Балкон:</label>"
-             << "<select name='balcony'>"
-             << "<option value='есть'" << (params.count("balcony") && params.at("balcony") == "есть" ? " selected" : "") << ">Есть</option>"
-             << "<option value='нет'" << (params.count("balcony") && params.at("balcony") == "нет" ? " selected" : "") << ">Нет</option>"
-             << "</select>"
-
-             << "<label>Минимальный этаж:</label>"
-             << "<input type='number' name='floor_min' value='" << (params.count("floor_min") ? params.at("floor_min") : "") << "'>"
-
-             << "<label>Максимальный этаж:</label>"
-             << "<input type='number' name='floor_max' value='" << (params.count("floor_max") ? params.at("floor_max") : "") << "'>"
-
-             << "<label>Тип дома:</label>"
-             << "<select name='house_type'>"
-             << "<option value='кирпичный'" << (params.count("house_type") && params.at("house_type") == "кирпичный" ? " selected" : "") << ">Кирпичный</option>"
-             << "<option value='панельный'" << (params.count("house_type") && params.at("house_type") == "панельный" ? " selected" : "") << ">Панельный</option>"
-             << "<option value='монолитный'" << (params.count("house_type") && params.at("house_type") == "монолитный" ? " selected" : "") << ">Монолитный</option>"
-             << "</select>"
-
-             << "<input type='submit' value='Сохранить' style='margin-top: 20px; padding: 10px;'>"
-             << "</form>"
-
-             << "<div style='margin-top: 20px;'>"
-             << "<a href='/compare_criteria?username=" << username << "'>Сравнить критерии</a><br>"
-             << "<a href='/view_apartments?username=" << username << "'>Просмотреть квартиры</a><br>"
-             << "<a href='/login'>Выйти</a>"
-             << "</div>"
-             << "</body></html>";
-
-        return crow::response(html.str());
+        return crow::response(generateCriteriaSelectionPage(username));
     });
 
-    CROW_ROUTE(server, "/parameters").methods("POST"_method)([](const crow::request& req) -> crow::response {
+    CROW_ROUTE(server, "/save_criteria").methods("POST"_method)([](const crow::request& req) -> crow::response {
         auto formData = parseFormData(req.body);
-        std::string username = formData.count("username") ? formData["username"] : "";
+        std::string username = formData["username"];
 
-        if (username.empty()) {
-            crow::response res;
-            res.redirect("/login");
-            return res;
-        }
-
-        formData.erase("username"); // Удаляем username из параметров
-
-        if (saveUserParameters(username, formData)) {
-            crow::response res;
-            res.redirect("/parameters?username=" + username); // Важно: добавляем username в редирект
-            return res;
-        } else {
-            return crow::response("<html><head><meta charset='UTF-8'></head><body><h2>Ошибка сохранения параметров!</h2><a href='/parameters?username=" + username + "'>Назад</a></body></html>");
-        }
-    });
-
-    CROW_ROUTE(server, "/compare_criteria").methods("GET"_method)([](const crow::request& req) -> crow::response {
-        const char* username_param = req.url_params.get("username");
-        std::string username = username_param ? username_param : "";
-
-        if (username.empty()) {
-            crow::response res;
-            res.redirect("/login");
-            return res;
-        }
-
-        return crow::response(generateComparisonPage(username));
-    });
-
-    CROW_ROUTE(server, "/compare_criteria").methods("POST"_method)([](const crow::request& req) -> crow::response {
-        auto formData = parseFormData(req.body);
-        const char* username_param = formData["username"].c_str();
-        std::string username = username_param ? username_param : "";
-
-        if (username.empty()) {
-            crow::response res;
-            res.redirect("/login");
-            return res;
-        }
-
-        size_t currentPair = formData.count("current_pair") ? std::stoul(formData["current_pair"]) : 0;
-        int comparison = formData.count("comparison") ? std::stoi(formData["comparison"]) : 0;
-
-        // Сохраняем сравнение в БД
-        if (currentPair < AHP::criteria.size() * (AHP::criteria.size() - 1) / 2) {
-            size_t i = 0, j = 0, count = 0;
-            for (i = 0; i < AHP::criteria.size(); ++i) {
-                for (j = i + 1; j < AHP::criteria.size(); ++j) {
-                    if (count == currentPair) {
-                        QSqlDatabase db = openDatabase();
-                        if (db.isOpen()) {
-                            QSqlQuery query(db);
-                            query.prepare("INSERT INTO user_comparisons (username, criteria_pair, comparison_value) "
-                                          "VALUES (:username, :pair, :value)");
-                            query.bindValue(":username", QString::fromStdString(username));
-                            query.bindValue(":pair",
-                                            QString::fromStdString(AHP::criteria[i] + "-" + AHP::criteria[j]));
-                            query.bindValue(":value", comparison);
-                            if (!query.exec()) {
-                                qDebug() << "Ошибка сохранения сравнения:" << query.lastError().text();
-                            }
-                        }
-                        goto done_saving;
+        std::map<std::string, int> comparisons;
+        for (size_t i = 0; i < AHP::criteria.size(); ++i) {
+            for (size_t j = i + 1; j < AHP::criteria.size(); ++j) {
+                std::string key = AHP::criteria[i] + "-" + AHP::criteria[j];
+                if (formData.count(key)) {
+                    try {
+                        int value = std::stoi(formData[key]);
+                        comparisons[key] = value;
+                    } catch (const std::invalid_argument&) {
+                        std::cerr << "Ошибка: недопустимое значение для пары " << key << "\n";
+                        return crow::response(400, "Недопустимое значение для пары " + key);
                     }
-                    ++count;
                 }
             }
-        done_saving:;
         }
 
-        // Переходим к следующей паре или завершаем
-        currentPair++;
-        if (currentPair >= AHP::criteria.size() * (AHP::criteria.size() - 1) / 2) {
-            // Все пары сравнены, вычисляем веса
-            auto comparisons = getComparisonsFromDB(username);
-            auto matrix = AHP::createComparisonMatrix(comparisons);
-            auto weights = AHP::calculateWeights(matrix);
-            double cr = AHP::calculateConsistencyRatio(matrix, weights);
+        auto matrix = AHP::createComparisonMatrix(comparisons);
+        auto weights = AHP::calculateWeights(matrix);
+        double CR = AHP::calculateConsistencyRatio(matrix, weights);
 
-            return crow::response(generateWeightsPage(username, weights, cr));
-        }
-
-        return crow::response(generateComparisonPage(username, currentPair));
-    });
-
-    CROW_ROUTE(server, "/save_weights").methods("POST"_method)([](const crow::request& req) -> crow::response {
-        auto formData = parseFormData(req.body);
-        const char* username_param = formData["username"].c_str();
-        std::string username = username_param ? username_param : "";
-
-        if (username.empty()) {
-            crow::response res;
-            res.redirect("/login");
-            return res;
-        }
-
-        std::vector<double> weights(AHP::criteria.size());
-        for (size_t i = 0; i < AHP::criteria.size(); ++i) {
-            weights[i] = std::stod(formData[AHP::criteria[i]]);
-        }
-
-        if (saveWeights(username, weights)) {
-            crow::response res;
-            res.redirect("/parameters?username=" + username);
-            return res;
-        } else {
-            return crow::response("<html><head><meta charset='UTF-8'></head><body><h2>Ошибка сохранения весов!</h2><a href='/parameters?username=" + username + "'>Назад</a></body></html>");
-        }
-    });
-
-    CROW_ROUTE(server, "/view_apartments").methods("GET"_method)([](const crow::request& req) -> crow::response {
-        const char* username_param = req.url_params.get("username");
-        std::string username = username_param ? username_param : "";
-
-        /*if (username.empty()) {
-            crow::response res;
-            res.redirect("/login");
-            return res;
-        }*/
-
-        auto weights = getWeights(username);
-        auto userParams = getUserParameters(username);
-        auto apartments = getApartmentsFromDB();
-        auto evaluated = evaluateApartments(apartments, weights, userParams);
-
-        return crow::response(generateApartmentList(username, evaluated));
-    });
-
-    // API endpoint to get apartments data
-    CROW_ROUTE(server, "/api/apartments").methods("GET"_method)([](const crow::request& req) -> crow::response {
-        const char* username_param = req.url_params.get("username");
-        std::string username = username_param ? username_param : "";
-
-        if (username.empty()) {
-            return crow::response(401, "Unauthorized");
-        }
-
-        auto weights = getWeights(username);
-        auto userParams = getUserParameters(username);
-        auto apartments = getApartmentsFromDB();
-        auto evaluated = evaluateApartments(apartments, weights, userParams);
-
-        crow::json::wvalue result;
-        for (size_t i = 0; i < evaluated.size(); ++i) {
-            const auto& [score, apt] = evaluated[i];
-            result["apartments"][i]["id"] = apt.id;
-            result["apartments"][i]["score"] = score;
-            result["apartments"][i]["price"] = apt.price;
-            result["apartments"][i]["area"] = apt.area;
-            result["apartments"][i]["rooms"] = apt.rooms;
-            result["apartments"][i]["district"] = apt.district;
-            result["apartments"][i]["transport"] = apt.transport;
-            result["apartments"][i]["infrastructure"] = apt.infrastructure;
-            result["apartments"][i]["condition"] = apt.condition;
-            result["apartments"][i]["house_type"] = apt.house_type;
-            result["apartments"][i]["floor"] = apt.floor;
-            result["apartments"][i]["balcony"] = apt.balcony;
-            result["apartments"][i]["description"] = apt.description;
-            result["apartments"][i]["photo_url"] = apt.photo_url;
-        }
-
-        return crow::response(result);
-    });
-
-    // Admin endpoint to add new apartments
-    CROW_ROUTE(server, "/admin/add_apartment").methods("GET"_method)([]() {
-        return crow::response(R"(<html><head><meta charset='UTF-8'></head><body>
-               <h2>Добавить квартиру</h2>
-               <form action='/admin/add_apartment' method='POST'>
-               Цена: <input type='text' name='price'><br>
-               Площадь: <input type='text' name='area'><br>
-               Комнат: <input type='text' name='rooms'><br>
-               Район: <input type='text' name='district'><br>
-               Транспорт (0-10): <input type='text' name='transport'><br>
-               Инфраструктура (0-10): <input type='text' name='infrastructure'><br>
-               Состояние: <select name='condition'>
-                 <option value='новый'>Новый</option>
-                 <option value='хороший'>Хороший</option>
-                 <option value='удовлетворительный'>Удовлетворительный</option>
-               </select><br>
-               Тип дома: <select name='house_type'>
-                 <option value='кирпичный'>Кирпичный</option>
-                 <option value='панельный'>Панельный</option>
-                 <option value='монолитный'>Монолитный</option>
-               </select><br>
-               Этаж: <input type='text' name='floor'><br>
-               Балкон: <select name='balcony'>
-                 <option value='1'>Есть</option>
-                 <option value='0'>Нет</option>
-               </select><br>
-               Описание: <textarea name='description'></textarea><br>
-               URL фото: <input type='text' name='photo_url'><br>
-               <input type='submit' value='Добавить'>
-               </form>
-               </body></html>)");
-    });
-
-    CROW_ROUTE(server, "/admin/add_apartment").methods("POST"_method)([](const crow::request& req) -> crow::response {
-        auto formData = parseFormData(req.body);
-
-        QSqlDatabase db = openDatabase();
-        if (!db.isOpen()) {
-            return crow::response(500, "Database error");
-        }
-
-        QSqlQuery query(db);
-        query.prepare("INSERT INTO apartments (price, area, rooms, district, transport, infrastructure, condition, house_type, floor, balcony, description, photo_url) "
-                      "VALUES (:price, :area, :rooms, :district, :transport, :infrastructure, :condition, :house_type, :floor, :balcony, :description, :photo_url)");
-
-        for (const auto& [key, value] : formData) {
-            if (key == "balcony") {
-                query.bindValue(":balcony", value == "1" ? true : false);
-            } else {
-                query.bindValue(QString::fromStdString(":" + key), QString::fromStdString(value));
-            }
-        }
-
-        if (!query.exec()) {
-            qDebug() << "Ошибка добавления квартиры:" << query.lastError().text();
-            return crow::response(500, "Failed to add apartment");
-        }
+        saveWeights(username, weights);
 
         crow::response res;
-        res.redirect("/admin/add_apartment");
+        res.redirect("/view_apartments?username=" + username);
         return res;
     });
 
+
+    CROW_ROUTE(server, "/save_preferences").methods("POST"_method)([](const crow::request& req) {
+        auto formData = parseFormData(req.body);
+        std::string username = formData["username"];
+
+        std::map<std::string, std::string> preferences;
+        preferences["budget"] = formData["budget"];
+        preferences["district"] = formData["district"];
+        preferences["type"] = formData["type"];
+        preferences["area_min"] = formData["area_min"];
+        preferences["area_max"] = formData["area_max"];
+        preferences["rooms"] = formData["rooms"];
+        preferences["balcony"] = formData["balcony"];
+        preferences["floor_min"] = formData["floor_min"];
+        preferences["floor_max"] = formData["floor_max"];
+        preferences["house_type"] = formData["house_type"];
+
+        if (saveUserParameters(username, preferences)) {
+            crow::response res;
+            res.redirect("/select_criteria?username=" + username);
+            return res;
+        } else {
+            return crow::response(500, "Ошибка сохранения предпочтений");
+        }
+    });
+
+    CROW_ROUTE(server, "/view_apartments")
+        .methods("GET"_method, "POST"_method)
+        ([](const crow::request& req) {
+            const char* username_param = req.url_params.get("username");
+            std::string username = username_param ? username_param : "";
+
+            if (username.empty()) {
+                return crow::response(400, "Нет имени пользователя");
+            }
+
+            // Получение предпочтений пользователя
+            auto preferences = getUserParameters(username);
+
+            // Получение фильтров
+            std::map<std::string, std::string> filters;
+
+            if (req.method == "GET"_method) {
+                // Если параметр load_preferences=true, используем предпочтения из профиля
+                const char* load_preferences_param = req.url_params.get("load_preferences");
+                if (load_preferences_param && std::string(load_preferences_param) == "true") {
+                    filters = preferences;
+                } else {
+                    // Для GET-запросов параметры берутся из URL
+                    filters["budget"] = req.url_params.get("budget") ? req.url_params.get("budget") : "";
+                    filters["area_min"] = req.url_params.get("area_min") ? req.url_params.get("area_min") : "";
+                    filters["area_max"] = req.url_params.get("area_max") ? req.url_params.get("area_max") : "";
+                    filters["rooms"] = req.url_params.get("rooms") ? req.url_params.get("rooms") : "";
+                    filters["district"] = req.url_params.get("district") ? req.url_params.get("district") : "";
+                    filters["house_type"] = req.url_params.get("house_type") ? req.url_params.get("house_type") : "";
+                    filters["floor_min"] = req.url_params.get("floor_min") ? req.url_params.get("floor_min") : "";
+                    filters["floor_max"] = req.url_params.get("floor_max") ? req.url_params.get("floor_max") : "";
+                    filters["balcony"] = req.url_params.get("balcony") ? req.url_params.get("balcony") : "";
+                }
+            } else if (req.method == "POST"_method) {
+                // Для POST-запросов параметры берутся из тела запроса
+                auto formData = parseFormData(req.body);
+                filters = formData;
+            }
+
+            // Получение квартир
+            auto apartments = getTestApartments();
+
+            // Фильтрация квартир
+            auto filteredApartments = filterApartments(apartments, filters);
+
+            // Получение весов и параметров пользователя
+            auto weights = getWeights(username);
+            auto userParams = getUserParameters(username);
+
+            // Оценка квартир
+            auto evaluated = evaluateApartments(filteredApartments, weights, userParams);
+
+            // Генерация HTML
+            return crow::response(generateApartmentList(username, evaluated, filters));
+        });
+
+
+    CROW_ROUTE(server, "/profile")
+        .methods("GET"_method, "POST"_method)([](const crow::request& req) -> crow::response {
+            const char* username_param = req.url_params.get("username");
+            std::string username = username_param ? username_param : "";
+
+            if (username.empty()) {
+                return crow::response(400, "Нет имени пользователя");
+            }
+
+            if (req.method == "GET"_method) {
+                auto weights = getWeights(username);
+                auto params = getUserParameters(username);
+
+                // Получаем сравнения из базы данных
+                auto comparisons = getComparisonsFromDB(username);
+
+                // Создаем матрицу сравнений и вычисляем CR
+                auto matrix = AHP::createComparisonMatrix(comparisons);
+                double CR = AHP::calculateConsistencyRatio(matrix, weights);
+
+                return crow::response(generateProfilePage(username, weights, params, CR));
+            } else if (req.method == "POST"_method) {
+                auto formData = parseFormData(req.body);
+                saveUserParameters(username, formData);
+                return crow::response(200, "Профиль обновлен");
+            } else {
+                return crow::response(405, "Метод не поддерживается");
+            }
+        });
+
+
+    CROW_ROUTE(server, "/edit_profile")
+        .methods("GET"_method, "POST"_method)
+        ([](const crow::request& req) {
+            std::string username;
+
+            if (req.method == "GET"_method) {
+                // Извлечение username из URL для GET-запроса
+                const char* username_param = req.url_params.get("username");
+                username = username_param ? username_param : "";
+            } else if (req.method == "POST"_method) {
+                // Извлечение username из тела запроса для POST-запроса
+                auto formData = parseFormData(req.body);
+                if (!formData.count("username")) {
+                    return crow::response(400, "Не указано имя пользователя");
+                }
+                username = formData["username"];
+            } else {
+                return crow::response(405, "Метод не поддерживается");
+            }
+
+            if (username.empty()) {
+                return crow::response(400, "Нет имени пользователя");
+            }
+
+            if (req.method == "GET"_method) {
+                // Показать форму редактирования
+                auto params = getUserParameters(username);
+                return crow::response(generateEditProfilePage(username, params));
+            } else if (req.method == "POST"_method) {
+                // Сохранить предпочтения
+                auto formData = parseFormData(req.body);
+                if (saveUserParameters(username, formData)) {
+                    crow::response res;
+                    res.redirect("/view_apartments?username=" + username);
+                    return res;
+                } else {
+                    return crow::response(500, "Ошибка сохранения предпочтений");
+                }
+            }
+
+            return crow::response(400, "Неизвестная ошибка");
+        });
+
+
+    // Добавление/удаление из избранного
+    CROW_ROUTE(server, "/toggle_favorite")
+        .methods("POST"_method)([](const crow::request& req) {
+            auto formData = parseFormData(req.body);
+            std::string username = formData["username"];
+            int apartmentId = 0;
+            try {
+                apartmentId = std::stoi(formData["apartment_id"]);
+            } catch (const std::exception& e) {
+                qDebug() << "Ошибка преобразования apartment_id:" << e.what();
+                return crow::response(400, "Invalid apartment_id");
+            }
+
+            qDebug() << "Запрос на добавление/удаление из избранного. Пользователь:" << username << ", ID квартиры:" << apartmentId;
+
+            if (isFavorite(username, apartmentId)) {
+                if (removeFromFavorites(username, apartmentId)) {
+                    qDebug() << "Квартира удалена из избранного";
+                } else {
+                    qDebug() << "Ошибка при удалении из избранного";
+                }
+            } else {
+                if (addToFavorites(username, apartmentId)) {
+                    qDebug() << "Квартира добавлена в избранное";
+                } else {
+                    qDebug() << "Ошибка при добавлении в избранное";
+                }
+            }
+
+            crow::response res;
+            res.redirect("/view_apartments?username=" + username);
+            return res;
+        });
+
+
+
+    // Страница избранного
+    CROW_ROUTE(server, "/favorites")
+        .methods("GET"_method)([](const crow::request& req) {
+            const char* username_param = req.url_params.get("username");
+            std::string username = username_param ? username_param : "";
+
+            if (username.empty()) {
+                return crow::response(400, "Нет имени пользователя");
+            }
+
+            auto favorites = getFavorites(username);
+            std::vector<std::pair<double, Apartment>> evaluated;
+            for (const auto& apt : favorites) {
+                evaluated.emplace_back(100.0, apt); // Условный максимальный балл
+            }
+
+            return crow::response(generateFavoritesPage(username, evaluated));
+        });
+
+    CROW_ROUTE(server, "/compare")
+        .methods("GET"_method)([](const crow::request& req) {
+            const char* username_param = req.url_params.get("username");
+            const char* apartment_id_param = req.url_params.get("apartment_id");
+
+            std::string username = username_param ? username_param : "";
+            if (username.empty()) {
+                return crow::response(400, "Нет имени пользователя");
+            }
+
+            // Получаем список всех квартир
+            auto apartments = getTestApartments();
+
+            // Если передан ID квартиры, показываем список для выбора второй квартиры
+            if (apartment_id_param) {
+                int first_apartment_id = std::stoi(apartment_id_param);
+                std::ostringstream html;
+
+                html << R"(<html><head><meta charset='UTF-8'>
+            <style>
+                body {
+                    font-family: Bahnschrift, sans-serif;
+                    background-color: #E0F7FE;
+                    margin: 0;
+                    padding: 20px;
+                    color: #002366;
+                }
+                h2 {
+                    color: #002366;
+                    text-align: center;
+                    margin-bottom: 20px;
+                }
+                .apartment-list {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 20px;
+                    justify-content: center;
+                }
+                .apartment-item {
+                    background-color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+                    width: 300px;
+                    transition: transform 0.2s, box-shadow 0.2s;
+                    box-sizing: border-box; /* Учитываем padding в ширине */
+                }
+                .apartment-item:hover {
+                    transform: translateY(-5px);
+                    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+                }
+                .apartment-item h3 {
+                    margin: 0 0 10px 0;
+                    color: #002366;
+                    font-size: 1.5em;
+                }
+                .apartment-item p {
+                    margin: 5px 0;
+                    color: #002366;
+                    font-size: 1.1em;
+                }
+                .compare-button {
+                    display: inline-block;
+                    background-color: #002366;
+                    color: white;
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    text-decoration: none;
+                    text-align: center;
+                    font-size: 1em;
+                    margin-top: 10px;
+                    width: calc(100% - 40px); /* Учитываем padding контейнера */
+                    box-sizing: border-box; /* Учитываем padding в ширине */
+                    transition: background-color 0.2s;
+                }
+                .compare-button:hover {
+                    background-color: #001F3F;
+                }
+                .back-button {
+                    display: inline-block;
+                    background-color: #002366;
+                    color: white;
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    text-decoration: null;
+                    text-align: center;
+                    font-size: 1em;
+                    margin-top: 20px;
+                    width: calc(100% - 40px); /* Учитываем padding контейнера */
+                    box-sizing: border-box; /* Учитываем padding в ширине */
+                    transition: background-color 0.2s;
+                }
+                .back-button:hover {
+                    background-color: #001F3F;
+                }
+                .container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 0 20px;
+                    box-sizing: border-box; /* Учитываем padding в ширине */
+                }
+            </style>
+            </head><body>
+            <div class="container">
+                <h2>Выберите вторую квартиру для сравнения</h2>
+                <div class="apartment-list">)";
+
+                for (const auto& apt : apartments) {
+                    if (apt.id != first_apartment_id) {
+                        html << R"(<div class="apartment-item">
+                    <h3>)" << apt.description << R"(</h3>
+                    <p>Район: )" << apt.district << R"(</p>
+                    <p>Цена: )" << formatPrice(apt.price) << R"(</p>
+                    <a href="/compare_result?username=)" << username
+                             << "&apartment1=" << first_apartment_id
+                             << "&apartment2=" << apt.id
+                             << R"(" class="compare-button">Сравнить с этой</a>
+                </div>)";
+                    }
+                }
+
+                html << R"(</div>
+                <a href="/view_apartments?username=)" << username << R"(" class="back-button">Назад к списку</a>
+            </div>
+            </body></html>)";
+
+                return crow::response(html.str());
+            }
+
+            // Если ID квартиры не передан, показываем обычную страницу сравнения
+            return crow::response(generateComparisonPage(username, apartments));
+        });
+
+
+
+    CROW_ROUTE(server, "/compare_result")
+        .methods("GET"_method)([](const crow::request& req) {
+            const char* username_param = req.url_params.get("username");
+            const char* apartment1_param = req.url_params.get("apartment1");
+            const char* apartment2_param = req.url_params.get("apartment2");
+
+            std::string username = username_param ? username_param : "";
+            int apartment1_id = apartment1_param ? std::stoi(apartment1_param) : -1;
+            int apartment2_id = apartment2_param ? std::stoi(apartment2_param) : -1;
+
+            if (username.empty() || apartment1_id == -1 || apartment2_id == -1) {
+                return crow::response(400, "Неверные параметры запроса");
+            }
+
+            // Получаем квартиры для сравнения
+            auto apartments = getTestApartments();
+            std::vector<Apartment> selectedApartments;
+
+            for (const auto& apt : apartments) {
+                if (apt.id == apartment1_id || apt.id == apartment2_id) {
+                    selectedApartments.push_back(apt);
+                }
+            }
+
+            if (selectedApartments.size() != 2) {
+                return crow::response(400, "Не удалось найти одну из квартир");
+            }
+
+            return crow::response(generateComparisonResultsPage(username, selectedApartments));
+        });
     server.port(8080).multithreaded().run();
     return app.exec();
 }

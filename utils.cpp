@@ -46,11 +46,13 @@ std::vector<std::pair<double, Apartment>> evaluateApartments(
     std::vector<std::pair<double, Apartment>> evaluated;
     if (apartments.empty() || weights.size() != AHP::criteria.size()) return evaluated;
 
+    // Оценка квартир
     for (const auto& apt : apartments) {
         double score = apt.evaluate(weights, userParams);
         evaluated.emplace_back(score, apt);
     }
 
+    // Нормализация баллов
     auto [minIt, maxIt] = std::minmax_element(
         evaluated.begin(), evaluated.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -62,8 +64,16 @@ std::vector<std::pair<double, Apartment>> evaluateApartments(
         score = Apartment::normalizeScore(score, minScore, maxScore);
     }
 
+    // Сортировка сначала по оценке, затем по другим критериям
     std::sort(evaluated.begin(), evaluated.end(),
-              [](const auto& a, const auto& b) { return a.first > b.first; });
+              [](const auto& a, const auto& b) {
+                  if (a.first != b.first) {
+                      return a.first > b.first; // Сначала по оценке (по убыванию)
+                  } else {
+                      // Если оценки равны, сортируем по цене (по возрастанию)
+                      return a.second.price < b.second.price;
+                  }
+              });
 
     return evaluated;
 }

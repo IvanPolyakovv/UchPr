@@ -1,5 +1,6 @@
 QT -= gui
-QT += core
+QT += core \
+    widgets
 QT += sql
 CONFIG += console c++17
 CONFIG -= app_bundle
