@@ -3,6 +3,7 @@
 #include <cmath>
 #include <stdexcept>
 
+//Расчёт оценки квартиры
 double Apartment::evaluate(const std::vector<double>& weight, const std::map<std::string, std::string>& userParams) const {
     std::vector<double> score(weight.size(), 0.0);
 
@@ -11,11 +12,10 @@ double Apartment::evaluate(const std::vector<double>& weight, const std::map<std
     if (userParams.count("budget")) {
         try {
             userBudget = std::stod(userParams.at("budget"));
-        } catch (const std::invalid_argument&) {
-            // Обработка ошибки: используем значение по умлчанию
-        }
+        } catch (...) {}
     }
-    score[0] = (userBudget - std::max(0.0, price - userBudget)) / userBudget;
+    // Оценка от 0 (цена = бюджет) до 1 (цена = 0)
+    score[0] = std::max(0.0, 1.0 - (price / userBudget));
 
     // Площадь
     double area_min = 0; // Значение по умолчанию
@@ -181,7 +181,7 @@ double Apartment::evaluate(const std::vector<double>& weight, const std::map<std
 
     // Балкон
     std::string preferredBalcony = userParams.count("balcony") ? userParams.at("balcony") : "есть";
-    score[9] = (balcony == (preferredBalcony == "есть")) ? 1.0 : 0.0;
+    score[9] = (balcony == (preferredBalcony == "есть")) ? 1.0 : (balcony == (preferredBalcony == "нет")) ? 0.8 : 0.3;
 
     // Итоговый балл
     double total = 0.0;
@@ -191,8 +191,8 @@ double Apartment::evaluate(const std::vector<double>& weight, const std::map<std
 
     return total * 100;
 }
-
+//Нормализация оценки
 double Apartment::normalizeScore(double rawScore, double minScore, double maxScore) {
-    if (maxScore == minScore) return 50.0;
-    return 100.0 * (rawScore - minScore) / (maxScore - minScore);
+    if (maxScore == minScore) return 50.0; // Возвращаем исходную оценку, если все оценки равны
+    return rawScore; // Приводим к шкале относительно максимального балла
 }

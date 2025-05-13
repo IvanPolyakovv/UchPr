@@ -1,15 +1,15 @@
 #include "ahp.h"
 #include <algorithm>
-#include <numeric>
 #include <cmath>
 #include <map>
-#include <iostream> // Для std::cerr
+#include <iostream>
 
 const std::vector<std::string> AHP::criteria = {
     "price", "area", "rooms", "district", "transport",
     "infrastructure", "condition", "house_type", "floor", "balcony"
 };
 
+//Шкала Саати
 const std::vector<std::vector<double>> AHP::saatiScale = {
     {1, 1},       // 0: Одинаково важны
     {3, 1.0/3},   // 1: Слегка важнее (первый важнее второго в 3 раза)
@@ -22,7 +22,7 @@ const std::vector<std::vector<double>> AHP::saatiScale = {
     {1.0/9, 9}    // 8: Абсолютно менее важны (второй важнее первого в 9 раз)
 };
 
-
+//Создание матрицы попарных сравнений
 std::vector<std::vector<double>> AHP::createComparisonMatrix(const std::map<std::string, int>& comparisons) {
     size_t n = criteria.size();
     std::vector<std::vector<double>> matrix(n, std::vector<double>(n, 1.0));
@@ -55,7 +55,7 @@ std::vector<std::vector<double>> AHP::createComparisonMatrix(const std::map<std:
     return matrix;
 }
 
-
+//Вычисление весов критериев
 std::vector<double> AHP::calculateWeights(const std::vector<std::vector<double>>& matrix) {
     size_t n = matrix.size();
     std::vector<double> weights(n, 0.0);
@@ -88,7 +88,7 @@ std::vector<double> AHP::calculateWeights(const std::vector<std::vector<double>>
     return weights;
 }
 
-
+//Вычисление отношения согласованности
 double AHP::calculateConsistencyRatio(const std::vector<std::vector<double>>& matrix, const std::vector<double>& weights) {
     size_t n = matrix.size();
     if (n < 2) return 0.0;

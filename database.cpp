@@ -6,6 +6,7 @@
 #include <QThread>
 #include <QSqlRecord>
 
+//Открыть БД
 QSqlDatabase openDatabase() {
     QString connectionName = QString("Connection_%1").arg((quintptr)QThread::currentThread()->currentThreadId());
 
@@ -24,7 +25,7 @@ QSqlDatabase openDatabase() {
     return db;
 }
 
-
+//Проверить логин и пароль
 bool checkCredentials(const std::string& username, const std::string& password) {
     QSqlDatabase db = openDatabase();
     if (!db.isOpen()) return false;
@@ -43,7 +44,7 @@ bool checkCredentials(const std::string& username, const std::string& password) 
     }
     return false;
 }
-
+//Зарегистрировать
 bool registerUser(const std::string& username, const std::string& password, const std::map<std::string, std::string>& preferences) {
     QSqlDatabase db = openDatabase();
     if (!db.isOpen()) return false;
@@ -82,8 +83,7 @@ bool registerUser(const std::string& username, const std::string& password, cons
     return true;
 }
 
-
-
+//Сохранить предпочтения
 bool saveUserParameters(const std::string& username, const std::map<std::string, std::string>& params) {
     QSqlDatabase db = openDatabase();
     if (!db.isOpen()) {
@@ -115,6 +115,7 @@ bool saveUserParameters(const std::string& username, const std::map<std::string,
     return true;
 }
 
+//Получить предпочтения
 std::map<std::string, std::string> getUserParameters(const std::string& username) {
     QSqlDatabase db = openDatabase();
     std::map<std::string, std::string> params;
@@ -139,7 +140,7 @@ std::map<std::string, std::string> getUserParameters(const std::string& username
     return params;
 }
 
-
+//Получить список квартир
 std::vector<Apartment> getApartmentsFromDB() {
     std::vector<Apartment> apartments;
 
@@ -163,7 +164,7 @@ std::vector<Apartment> getApartmentsFromDB() {
     return apartments;
 }
 
-
+//Получить сравнения
 std::map<std::string, int> getComparisonsFromDB(const std::string& username) {
     QSqlDatabase db = openDatabase();
     std::map<std::string, int> comparisons;
@@ -186,6 +187,7 @@ std::map<std::string, int> getComparisonsFromDB(const std::string& username) {
     return comparisons;
 }
 
+//Сохранить веса критериев
 bool saveWeights(const std::string& username, const std::vector<double>& weights) {
     QSqlDatabase db = openDatabase();
     if (!db.isOpen()) return false;
@@ -207,6 +209,7 @@ bool saveWeights(const std::string& username, const std::vector<double>& weights
     return true;
 }
 
+//Получить веса критериев
 std::vector<double> getWeights(const std::string& username) {
     QSqlDatabase db = openDatabase();
     std::vector<double> weights(AHP::criteria.size(), 1.0 / AHP::criteria.size());
@@ -269,29 +272,32 @@ bool removeFromFavorites(const std::string& username, int apartmentId) {
     return true;
 }
 
-
 // Проверка, находится ли квартира в избранном
 bool isFavorite(const std::string& username, int apartmentId) {
     QSqlDatabase db = openDatabase();
     if (!db.isOpen()) {
-        qDebug() << "Ошибка: база данных не открыта";
+        qDebug() << "Ошибка: не удалось открыть базу данных.";
         return false;
     }
 
     QSqlQuery query(db);
-    query.prepare("SELECT COUNT(*) FROM favorites WHERE username = :username AND apartment_id = :apartment_id");
-    query.bindValue(":username", QString::fromStdString(username));
-    query.bindValue(":apartment_id", apartmentId);
+    query.prepare("SELECT COUNT(*) FROM favorites WHERE username = ? AND apartment_id = ?");
+    query.bindValue(0, QString::fromStdString(username));
+    query.bindValue(1, apartmentId);
 
-    if (query.exec() && query.next()) {
-        int count = query.value(0).toInt();
-        qDebug() << "Квартира" << apartmentId << "в избранном у пользователя" << username << ":" << (count > 0);
-        return count > 0;
+    if (!query.exec()) {
+        qDebug() << "Ошибка выполнения запроса: " << query.lastError().text().toStdString();
+        return false;
+    }
+
+    if (query.next()) {
+        return query.value(0).toInt() > 0;
     } else {
-        qDebug() << "Ошибка проверки избранного:" << query.lastError().text();
+        qDebug() << "Ошибка: запрос не вернул результатов.";
         return false;
     }
 }
+
 
 // Получение списка избранных квартир для пользователя
 std::vector<Apartment> getFavorites(const std::string& username) {

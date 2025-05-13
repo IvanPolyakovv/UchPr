@@ -9,18 +9,18 @@ class Apartment {
 public:
     std::string description;
     std::string district;
-    int id = 0;  // Добавлено
+    int id = 0;
     double price;
     double area;
     int rooms;
     bool balcony;
     std::string house_type;
     int floor;
-    double lat; // Широта
-    double lon; // Долгота
-    double transport; // Транспортная доступность
-    double infrastructure; // Инфраструктура
-    std::string condition; // Состояние квартиры
+    double lat;
+    double lon;
+    double transport;
+    double infrastructure;
+    std::string condition;
 
     double evaluate(const std::vector<double>& weights, const std::map<std::string, std::string>& userParams) const;
     static double normalizeScore(double rawScore, double minScore, double maxScore);

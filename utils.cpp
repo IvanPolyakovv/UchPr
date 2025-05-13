@@ -1,9 +1,13 @@
 #include "utils.h"
 #include "apartment.h"
 #include "ahp.h"
+#include "qdebug.h"
+#include "qlogging.h"
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <sstream>
+
 
 std::string urlDecode(const std::string& src) {
     std::string ret;
@@ -49,29 +53,50 @@ std::vector<std::pair<double, Apartment>> evaluateApartments(
     // Оценка квартир
     for (const auto& apt : apartments) {
         double score = apt.evaluate(weights, userParams);
+        if (std::isnan(score) || std::isinf(score)) {
+            qDebug() << "Ошибка: некорректный балл для квартиры ID: " << apt.id;
+            continue; // Пропустить некорректные записи
+        }
         evaluated.emplace_back(score, apt);
     }
 
-    // Нормализация баллов
+    // Проверка на пустой список после вычисления баллов
+    if (evaluated.empty()) return evaluated;
+
+    // Находим минимальное и максимальное значение "сырых" баллов
     auto [minIt, maxIt] = std::minmax_element(
         evaluated.begin(), evaluated.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; });
 
+    if (minIt == evaluated.end() || maxIt == evaluated.end()) {
+        qDebug() << "Ошибка: не удалось найти минимальный или максимальный балл.";
+        return evaluated;
+    }
+
     double minScore = minIt->first;
     double maxScore = maxIt->first;
 
-    for (auto& [score, apt] : evaluated) {
-        score = Apartment::normalizeScore(score, minScore, maxScore);
+    // Если все оценки одинаковы, возвращаем исходные баллы
+    if (minScore == maxScore) {
+        qDebug() << "Предупреждение: все квартиры имеют одинаковую оценку. Нормализация невозможна.";
+        for (auto& [score, apt] : evaluated) {
+            score = 50.0; // По умолчанию 50, если все квартиры равны
+        }
+        return evaluated;
     }
 
-    // Сортировка сначала по оценке, затем по другим критериям
+    // Нормализация баллов
+    for (auto& [score, apt] : evaluated) {
+        score = (score - minScore) / (maxScore - minScore) * 100.0; // Приводим к диапазону 0–100
+    }
+
+    // Сортировка
     std::sort(evaluated.begin(), evaluated.end(),
               [](const auto& a, const auto& b) {
                   if (a.first != b.first) {
-                      return a.first > b.first; // Сначала по оценке (по убыванию)
+                      return a.first > b.first; // По убыванию оценки
                   } else {
-                      // Если оценки равны, сортируем по цене (по возрастанию)
-                      return a.second.price < b.second.price;
+                      return a.second.price < b.second.price; // По возрастанию цены
                   }
               });
 
